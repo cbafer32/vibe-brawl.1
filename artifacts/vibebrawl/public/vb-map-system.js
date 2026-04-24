@@ -44,18 +44,17 @@
 
   function calcSmashKnockback(dmg) {
     // Single smooth exponential curve — no cliffs, no hard jumps.
-    // Calibrated so kills happen naturally starting ~165%, guaranteed by 200%.
+    // More even growth throughout the whole damage range.
     //
     //   0%  →  ~5   (tap)
-    //  50%  →  ~7   (light)
-    // 100%  →  ~18  (clear knockback)
-    // 130%  →  ~30  (strong, dangerous near edge)
-    // 150%  →  ~41  (near-kill from edge)
-    // 165%  →  ~48  (kill zone starts)
-    // 180%  →  ~61  (solid kill from most positions)
-    // 200%  →  ~79  (missile — guaranteed blast zone from anywhere)
-    // 230%+ →  ~120+ (instant launch)
-    return 5 + 0.0001 * Math.pow(Math.max(0, dmg), 2.55);
+    //  50%  →  ~9   (light)
+    // 100%  →  ~20  (clear knockback)
+    // 130%  →  ~29  (strong, dangerous near edge)
+    // 150%  →  ~37  (near-kill from edge)
+    // 175%  →  ~48  (kill zone starts)
+    // 200%  →  ~59  (missile — guaranteed blast zone from anywhere)
+    // 230%+ →  ~79+ (instant launch)
+    return 5 + 0.003 * Math.pow(Math.max(0, dmg), 1.85);
   }
 
   function patchFighterTakeHit(f) {
