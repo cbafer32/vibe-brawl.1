@@ -43,19 +43,19 @@
   window.addEventListener('keyup',   (e) => { _kbKeys[e.code] = false; }, { capture: true });
 
   function calcSmashKnockback(dmg) {
-    // Exponential formula: low dmg = small knockback, high dmg = big launch
-    const BASE    = 5;
-    const SCALING = 0.05;
-    let knockback = BASE + Math.pow(Math.max(0, dmg), 1.2) * SCALING;
-
-    // DANGER ZONE: 200%+ — missile-like launch, guaranteed blast zone kill
-    // Any hit above 200% sends them flying far past the blast zone
-    if (dmg >= 200) {
-      const excess = dmg - 200;
-      knockback = Math.max(knockback, 100 + excess * 1.5);
-    }
-
-    return knockback;
+    // Single smooth exponential curve — no cliffs, no hard jumps.
+    // Calibrated so kills happen naturally starting ~165%, guaranteed by 200%.
+    //
+    //   0%  →  ~5   (tap)
+    //  50%  →  ~7   (light)
+    // 100%  →  ~18  (clear knockback)
+    // 130%  →  ~30  (strong, dangerous near edge)
+    // 150%  →  ~41  (near-kill from edge)
+    // 165%  →  ~48  (kill zone starts)
+    // 180%  →  ~61  (solid kill from most positions)
+    // 200%  →  ~79  (missile — guaranteed blast zone from anywhere)
+    // 230%+ →  ~120+ (instant launch)
+    return 5 + 0.0001 * Math.pow(Math.max(0, dmg), 2.55);
   }
 
   function patchFighterTakeHit(f) {
