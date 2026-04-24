@@ -593,31 +593,20 @@
     }
   }
 
-  // --- Bordes como TRIGGERS (no colisiones sólidas) ---
-  // Etiquetas conceptuales:
-  //   - "BordeAzul" (PLAYABLE): trigger -> abre minimapa (onTriggerEnter, una sola vez)
-  //   - "BordeRojo" (BLAST):    trigger -> mata (onTriggerEnter, una sola vez)
+  // ── KO / Win-condition system ────────────────────────────────────────────────
+  // Qn (bundle) runs a blast-zone check at its hard-coded boundaries (±Zn/Jn).
+  // We intercept fighter properties so that:
+  //   • `alive`  — returns false only for spectators / truly-dead fighters.
+  //   • `lives`  — blocks Qn's decrement while fighter is outside OUR wider blast
+  //                zone; lets the fighter fly until ko() catches it at BLAST.
   //
-  // El bundle minificado tiene un chequeo de KO interno cableado en ±16 / y<-6
-  // (función `Qn`) que actúa como un "onTriggerStay": cada frame decrementa vida
-  // y reproduce el sonido `le.ko()` mientras el luchador esté en esa zona, lo
-  // cual provoca el bug del sonido en bucle.
-  //
-  // Solución: envolvemos la propiedad `alive` con un Proxy. Cuando la lectura
-  // proviene de la función `Qn` del bundle, devolvemos `false` para que el
-  // chequeo `l.alive && (...)` haga corto-circuito y no entre al cuerpo (no
-  // decrementa vidas, no reproduce sonido). Para cualquier otro consumidor
-  // (render, lógica de update, nuestro código), `alive` sigue devolviendo el
-  // valor real.
-  //
-  // Detección de quién llama: leemos `new Error().stack`. El bundle minificado
-  // usa el nombre `Qn` que aparece en el stack tanto en V8 ("at Qn (...)")
-  // como en Firefox ("Qn@...").
-  function isCalledFromBundleKO() {
-    const stack = (new Error()).stack || '';
-    return /(?:^|[\s@(])Qn(?:[\s@(.]|$)/m.test(stack);
-  }
-
+  // ── Patch `alive` ───────────────────────────────────────────────────────────
+  // Spectators must appear dead to the bundle's win-condition filter so the
+  // last-one-standing check works correctly.  We no longer use the
+  // "isCalledFromBundleKO" trick here because it poisoned the very filter we
+  // needed to work (Qn's `ae.filter(h => h.alive)` runs inside the same
+  // call-stack and was seeing all alive fighters as dead → instant fake draw).
+  // False KOs from Qn are now blocked via the `lives` setter instead.
   function patchFighterAlive(f) {
     if (!f || f._alivePatched) return;
     if (typeof f.alive === 'undefined') return;
@@ -628,24 +617,77 @@
       enumerable: true,
       get() {
         if (!this._alive) return false;
-        // Spectators appear dead to the bundle so it can correctly
-        // detect the last-one-standing win condition.
-        if (this._spectator) return false;
-        if (isCalledFromBundleKO()) {
-          // Solo ocultamos del bundle si NO está realmente en la zona roja.
-          const p = this.position;
-          if (!p) return true;
-          const inBlast =
-            p.x < BLAST.left || p.x > BLAST.right ||
-            p.y < BLAST.bottom || p.y > BLAST.top;
-          if (!inBlast) return false; // hace corto-circuito en Qn
-        }
+        if (this._spectator) return false; // spectators look dead to the bundle
         return true;
       },
       set(v) {
         this._alive = !!v;
-        // When the bundle revives a fighter (new game/round), clear spectator flag.
-        if (v) this._spectator = false;
+        if (v) this._spectator = false; // revival clears spectator flag
+      },
+    });
+  }
+
+  // ── Patch `respawn` ─────────────────────────────────────────────────────────
+  // When Qn's lives-decrement is blocked (fighter not yet in our wider BLAST
+  // zone), the `lives <= 0` branch is false, so Qn falls into its else-branch:
+  // `l.respawn(), le.spawn()`.  Without interception that would teleport the
+  // fighter back to the stage mid-air.  We wrap respawn() using the same
+  // call-stack check, ONLY for the Qn case (the respawn timer path doesn't
+  // originate from Qn, so it is unaffected).
+  function patchFighterRespawn(f) {
+    if (!f || f._respawnPatched) return;
+    if (typeof f.respawn !== 'function') return;
+    f._respawnPatched = true;
+    const orig = f.respawn.bind(f);
+    f.respawn = function() {
+      if (isCalledFromBundleKO()) {
+        // Called from within Qn. Only allow if the fighter is actually inside
+        // our blast zone (legitimate Qn KO that coincides with our boundary).
+        const p = this.position;
+        if (p) {
+          const inMyBlast =
+            p.x < BLAST.left  || p.x > BLAST.right  ||
+            p.y < BLAST.bottom || p.y > BLAST.top;
+          if (!inMyBlast) return; // premature Qn respawn — block it
+        }
+      }
+      orig();
+    };
+  }
+
+  function isCalledFromBundleKO() {
+    const s = (new Error()).stack || '';
+    return /(?:^|[\s@(])Qn(?:[\s@(.]|$)/m.test(s);
+  }
+
+  // ── Patch `lives` ───────────────────────────────────────────────────────────
+  // Qn (the bundle's KO function) checks blast at ±Zn/Jn — which is SMALLER
+  // than our BLAST zone.  It does `l.lives -= 1` the moment a fighter crosses
+  // that inner line.  We intercept the setter: if the new value is lower than
+  // the current value AND the fighter is NOT yet inside OUR (wider) blast zone,
+  // we silently drop the write.  This lets the fighter keep flying until it
+  // reaches our real kill boundary, where ko() handles it properly.
+  function patchFighterLives(f) {
+    if (!f || f._livesPatched) return;
+    if (typeof f.lives !== 'number') return;
+    f._livesPatched = true;
+    f._livesVal = f.lives;
+    Object.defineProperty(f, 'lives', {
+      configurable: true,
+      enumerable: true,
+      get() { return this._livesVal; },
+      set(v) {
+        // Block a decrement originating from Qn's inner blast zone check.
+        if (v < this._livesVal) {
+          const p = this.position;
+          if (p) {
+            const inMyBlast =
+              p.x < BLAST.left  || p.x > BLAST.right  ||
+              p.y < BLAST.bottom || p.y > BLAST.top;
+            if (!inMyBlast) return; // not in our zone yet — ignore Qn's decrement
+          }
+        }
+        this._livesVal = v;
       },
     });
   }
@@ -655,8 +697,15 @@
     if (!vb) return;
     const fighters = [vb.player, vb.dummy, vb.cpu2, vb.cpu3].filter(Boolean);
 
-    // 0) Convertir bordes en triggers para cada luchador (idempotente).
-    for (const f of fighters) patchFighterAlive(f);
+    // 0) Patch fighter properties (idempotent — safe to call every frame).
+    for (const f of fighters) {
+      patchFighterAlive(f);
+      patchFighterLives(f);
+      patchFighterRespawn(f);
+    }
+    // Ensure the bundle's AI is never frozen (it's set to false on startGame,
+    // but guard against any code that might have set it to true).
+    if (window.__VB_FREEZE_AI) window.__VB_FREEZE_AI = false;
 
     // 0b) Apply smash-style knockback physics (overrides bundle's lerp friction).
     applySmashKnockbackPhysics(fighters, vb);

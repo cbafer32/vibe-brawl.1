@@ -1,0 +1,141 @@
+Necesito cambiar el sistema de fin de partida y mejorar la IA de los CPU.
+
+PROBLEMA ACTUAL:
+
+* Cuando un personaje pierde sus 3 vidas, el juego muestra "empate" y se reinicia.
+* Los CPU no hacen nada (no pelean, no se mueven correctamente).
+
+CAMBIOS QUE TENÉS QUE HACER:
+
+---
+
+1. ELIMINAR EL EMPATE
+
+---
+
+* Quitar completamente la lógica de "empate"
+* NO reiniciar la partida cuando alguien pierde todas sus vidas
+
+---
+
+2. NUEVA CONDICIÓN DE VICTORIA
+
+---
+
+* La partida debe continuar hasta que solo quede 1 personaje con vidas > 0
+
+Ejemplo de lógica:
+
+let alivePlayers = players.filter(p => p.lives > 0);
+
+if (alivePlayers.length === 1) {
+let winner = alivePlayers[0];
+
+```
+gameOver = true;
+
+mostrarMensaje("Victoria de " + winner.name);
+```
+
+}
+
+---
+
+3. NO REINICIAR AUTOMÁTICAMENTE
+
+---
+
+* Cuando alguien gana:
+
+  * Mostrar el mensaje de victoria
+  * Detener el juego
+  * NO reiniciar automáticamente (opcional: reiniciar solo con botón)
+
+---
+
+4. ACTIVAR IA DE LOS CPU
+
+---
+
+Los 3 CPU deben:
+
+* Detectar a los otros jugadores (incluido el jugador humano)
+* Elegir un objetivo (target)
+* Moverse hacia ese objetivo
+* Atacar cuando estén cerca
+
+---
+
+5. COMPORTAMIENTO BÁSICO DE IA
+
+---
+
+Para cada CPU en cada frame:
+
+1. Elegir objetivo:
+
+* El jugador más cercano o uno aleatorio con vidas > 0
+
+2. Movimiento:
+   if (target.x < cpu.x) → moverse a la izquierda
+   if (target.x > cpu.x) → moverse a la derecha
+
+3. Saltar:
+
+* Si el target está más alto → saltar
+* O saltar aleatoriamente cada cierto tiempo
+
+4. Atacar:
+
+* Si está cerca del target:
+  atacar()
+
+5. Bloquear (opcional pero mejor):
+
+* Si el CPU detecta ataque cercano:
+  bloquear()
+
+---
+
+6. EJEMPLO SIMPLE DE IA
+
+---
+
+function updateCPU(cpu) {
+if (cpu.lives <= 0) return;
+
+```
+let targets = players.filter(p => p !== cpu && p.lives > 0);
+
+if (targets.length === 0) return;
+
+let target = getClosest(cpu, targets);
+
+// movimiento
+if (target.x < cpu.x) cpu.moveLeft();
+if (target.x > cpu.x) cpu.moveRight();
+
+// salto
+if (target.y < cpu.y && Math.random() < 0.02) {
+    cpu.jump();
+}
+
+// ataque
+let distance = Math.abs(target.x - cpu.x);
+if (distance < 50 && Math.random() < 0.1) {
+    cpu.attack();
+}
+```
+
+}
+
+---
+
+## OBJETIVO FINAL:
+
+* La partida NO termina hasta que quede un solo jugador vivo
+* Mostrar "Victoria de [nombre]"
+* Los CPU deben pelear activamente:
+  moverse, saltar, atacar y tratar de tirar a los demás del mapa
+
+No cambiar otras mecánicas del juego, solo sistema de victoria y comportamiento de CPU.
