@@ -46,7 +46,16 @@
     // Exponential formula: low dmg = small knockback, high dmg = big launch
     const BASE    = 5;
     const SCALING = 0.05;
-    return BASE + Math.pow(Math.max(0, dmg), 1.2) * SCALING;
+    let knockback = BASE + Math.pow(Math.max(0, dmg), 1.2) * SCALING;
+
+    // DANGER ZONE: 200%+ — missile-like launch, guaranteed blast zone kill
+    // Any hit above 200% sends them flying far past the blast zone
+    if (dmg >= 200) {
+      const excess = dmg - 200;
+      knockback = Math.max(knockback, 100 + excess * 1.5);
+    }
+
+    return knockback;
   }
 
   function patchFighterTakeHit(f) {
