@@ -34,6 +34,89 @@
   // que se disparan en ±16/-6 (antes de cruzar el rojo real).
   const prevSnap = new WeakMap();
 
+  // ============================================================
+  // SMASH-STYLE KNOCKBACK SYSTEM
+  // Overrides the bundle's takeHit with proper scaling + hitstun
+  // ============================================================
+  const _kbKeys = {};
+  window.addEventListener('keydown', (e) => { _kbKeys[e.code] = true; }, { capture: true });
+  window.addEventListener('keyup',   (e) => { _kbKeys[e.code] = false; }, { capture: true });
+
+  function calcSmashKnockback(dmg) {
+    // Exponential formula: low dmg = small knockback, high dmg = big launch
+    const BASE    = 5;
+    const SCALING = 0.05;
+    return BASE + Math.pow(Math.max(0, dmg), 1.2) * SCALING;
+  }
+
+  function patchFighterTakeHit(f) {
+    if (!f || f._kbPatched) return;
+    if (typeof f.takeHit !== 'function') return;
+    f._kbPatched = true;
+
+    f.takeHit = function(damage, sourceX) {
+      if (this.respawnTimer > 0) return;
+
+      // Accumulate damage
+      this.percent = (this.percent || 0) + damage;
+      const dmg = this.percent;
+
+      // Update facing direction (face away from attacker)
+      const attackerDir = Math.sign(sourceX - this.position.x);
+      if (attackerDir !== 0) this.facing = attackerDir;
+
+      // Knockback direction = opposite to attacker
+      const dir = -attackerDir || Math.sign(this.position.x - sourceX) || 1;
+      const knockback = calcSmashKnockback(dmg);
+
+      // Launch velocity
+      this.velocity.x = dir * knockback;
+      this.velocity.y = knockback * 0.7; // upward component
+
+      // Hitstun in frames (capped at 60 = 1 second)
+      const frames = Math.min(60, Math.floor(15 + dmg * 0.35));
+      this._smashHitstun  = frames;
+      this._smashVx       = this.velocity.x;
+
+      // Sync bundle's hitstun (seconds) to lock out its control logic
+      this.hitstun = frames / 60;
+
+      // Reset action states
+      this.grounded    = false;
+      this.isRolling   = false;
+      this.isAttacking = false;
+      this.isBlocking  = false;
+    };
+  }
+
+  function applySmashKnockbackPhysics(fighters, vb) {
+    for (const f of fighters) {
+      // Patch takeHit the first time we see this fighter
+      patchFighterTakeHit(f);
+
+      if (!f._smashHitstun || f._smashHitstun <= 0) continue;
+
+      f._smashHitstun--;
+
+      // Reduced air friction during knockback (0.98 instead of full lerp-to-zero)
+      f._smashVx *= 0.98;
+
+      // Limited directional influence (DI) for the human player only
+      if (!f.grounded && f === vb.player) {
+        if (_kbKeys['KeyA'] || _kbKeys['ArrowLeft'])  f._smashVx -= 0.3;
+        if (_kbKeys['KeyD'] || _kbKeys['ArrowRight']) f._smashVx += 0.3;
+      }
+
+      // Force override velocity.x — this runs after the bundle's update,
+      // so it wins over the bundle's lerp-based friction every frame
+      f.velocity.x = f._smashVx;
+
+      // Keep bundle hitstun in sync so the fighter stays locked out
+      f.hitstun = Math.max(f.hitstun || 0, f._smashHitstun / 60);
+    }
+  }
+  // ============================================================
+
   async function loadGLTFLoader() {
     const mod = await import('https://esm.sh/three@0.184.0/examples/jsm/loaders/GLTFLoader.js');
     return mod.GLTFLoader;
@@ -479,6 +562,9 @@
 
     // 0) Convertir bordes en triggers para cada luchador (idempotente).
     for (const f of fighters) patchFighterAlive(f);
+
+    // 0b) Apply smash-style knockback physics (overrides bundle's lerp friction).
+    applySmashKnockbackPhysics(fighters, vb);
 
     for (const f of fighters) {
       if (!f || !f.position || !f.alive) continue;
