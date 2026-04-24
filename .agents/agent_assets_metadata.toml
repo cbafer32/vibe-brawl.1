@@ -1,0 +1,26 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "UGBe3jaFgUMLrOpERUDkG"
+uri = "file://artifacts/vibebrawl/public/titan.png"
+type = "image"
+title = "titan portrait"
+
+[[generated]]
+id = "sY6mWZmuUtm3VOXq6e8HR"
+uri = "file://artifacts/vibebrawl/public/phantom.png"
+type = "image"
+title = "phantom portrait"
+
+[[generated]]
+id = "OFx7O7Ho7UHcSxtmh8A6J"
+uri = "file://artifacts/vibebrawl/public/viper.png"
+type = "image"
+title = "viper portrait"
+
+[[generated]]
+id = "6KpF8E7ke-ozYw98_JYel"
+uri = "file://artifacts/vibebrawl/public/blaze.png"
+type = "image"
+title = "blaze portrait"

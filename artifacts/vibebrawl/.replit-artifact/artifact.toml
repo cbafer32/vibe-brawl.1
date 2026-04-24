@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "VibeBrawl"
+version = "1.0.0"
+id = "artifacts/vibebrawl"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25396
+
+[services.development]
+run = "pnpm --filter @workspace/vibebrawl run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/vibebrawl", "run", "build" ]
+publicDir = "artifacts/vibebrawl/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25396"
+BASE_PATH = "/"
