@@ -64,6 +64,7 @@
 
     f.takeHit = function(damage, sourceX) {
       if (this.respawnTimer > 0) return;
+      if (this._spectator) return; // spectators are untouchable
 
       // Accumulate damage
       this.percent = (this.percent || 0) + damage;
@@ -495,20 +496,44 @@
 
   function ko(f) {
     if (!f.alive) return;
+    if (f._spectator) return;
     if (f._koCooldown && performance.now() < f._koCooldown) return;
     f._koCooldown = performance.now() + 1500;
 
     f.lives = Math.max(0, (typeof f.lives === 'number' ? f.lives : 3) - 1);
     if (f.percent !== undefined) f.percent = 0;
     if (f.hitstun !== undefined) f.hitstun = 0;
+    if (f._smashHitstun !== undefined) f._smashHitstun = 0;
     if (f.velocity && f.velocity.set) f.velocity.set(0, 0, 0);
-    if (f.position && f.position.set) {
-      const sx = typeof f.spawnX === 'number' ? f.spawnX : 0;
-      f.position.set(sx, 6, 0);
-    }
+
     if (f.lives <= 0) {
-      f.alive = false;
+      // Check how many active (non-spectator) fighters remain besides this one.
+      const vb = window.__vb;
+      const all = vb ? [vb.player, vb.dummy, vb.cpu2, vb.cpu3].filter(Boolean) : [];
+      const otherActive = all.filter(x => x !== f && !x._spectator && x.alive !== false);
+
+      if (otherActive.length === 0) {
+        // DRAW prevention: this fighter is the last one standing — they WIN.
+        // Restore 1 life so the bundle sees 1 player alive and declares them the winner.
+        f.lives = 1;
+        if (f.position && f.position.set) {
+          f.position.set(typeof f.spawnX === 'number' ? f.spawnX : 0, 6, 0);
+        }
+        f.respawnTimer = 0;
+      } else {
+        // Eliminate this fighter → spectator mode.
+        // They stay frozen off-screen while others finish the match.
+        f._spectator = true;
+        if (f.position && f.position.set) {
+          f.position.set(typeof f.spawnX === 'number' ? f.spawnX : 0, 30, 0);
+        }
+        // Do NOT set f.alive = false here directly — the proxy handles it via _spectator.
+      }
     } else {
+      if (f.position && f.position.set) {
+        const sx = typeof f.spawnX === 'number' ? f.spawnX : 0;
+        f.position.set(sx, 6, 0);
+      }
       f.respawnTimer = 1.2;
     }
   }
@@ -548,6 +573,9 @@
       enumerable: true,
       get() {
         if (!this._alive) return false;
+        // Spectators appear dead to the bundle so it can correctly
+        // detect the last-one-standing win condition.
+        if (this._spectator) return false;
         if (isCalledFromBundleKO()) {
           // Solo ocultamos del bundle si NO está realmente en la zona roja.
           const p = this.position;
@@ -559,7 +587,11 @@
         }
         return true;
       },
-      set(v) { this._alive = !!v; },
+      set(v) {
+        this._alive = !!v;
+        // When the bundle revives a fighter (new game/round), clear spectator flag.
+        if (v) this._spectator = false;
+      },
     });
   }
 
@@ -575,7 +607,20 @@
     applySmashKnockbackPhysics(fighters, vb);
 
     for (const f of fighters) {
-      if (!f || !f.position || !f.alive) continue;
+      if (!f || !f.position) continue;
+
+      // Spectators: keep frozen in a safe zone above the arena.
+      // They are invisible to the bundle's win/draw logic (alive = false via proxy).
+      if (f._spectator) {
+        const sx = typeof f.spawnX === 'number' ? f.spawnX : 0;
+        f.position.set(sx, 30, 0);
+        if (f.velocity && f.velocity.set) f.velocity.set(0, 0, 0);
+        if (f.isAttacking !== undefined) f.isAttacking = false;
+        if (f.isBlocking !== undefined) f.isBlocking = false;
+        continue;
+      }
+
+      if (!f.alive) continue;
 
       // 1) Ambos bordes son traspasables. El azul (PLAYABLE) NO mata: solo
       //    dispara la apertura del minimapa cuando alguien lo cruza. El rojo
