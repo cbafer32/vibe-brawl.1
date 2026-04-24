@@ -126,6 +126,61 @@
   }
   // ============================================================
 
+  // ============================================================
+  // MULTI-TARGET AI SYSTEM
+  // Makes each CPU independently target any fighter (player OR
+  // other CPUs) based on KO opportunity scoring. Uses the
+  // bundle's existing _aiStep for all combat execution —
+  // we only redirect aiTarget and boost aggression timers.
+  // ============================================================
+  const _aiTargetCooldowns = new WeakMap();
+
+  function pickBestTarget(cpu, allFighters) {
+    const candidates = allFighters.filter(t =>
+      t !== cpu && !t._spectator && t._alive !== false && t.alive !== false
+    );
+    if (candidates.length === 0) return null;
+
+    let best = null, bestScore = -Infinity;
+    for (const t of candidates) {
+      const dist  = Math.abs(t.position.x - cpu.position.x);
+      const dmg   = t.percent || 0;
+
+      // KO opportunity: high % near blast zone = top priority
+      const edgeBonus = Math.abs(t.position.x) > 10 ? 35 : 0;
+      // High damage targets are more attractive (can be KO'd with one good hit)
+      const dmgScore  = Math.min(dmg * 0.5, 80);
+      // Prefer closer targets, but don't ignore a high-% opponent far away
+      const distPenalty = dist * 1.2;
+
+      const score = dmgScore + edgeBonus - distPenalty;
+      if (score > bestScore) { bestScore = score; best = t; }
+    }
+    return best;
+  }
+
+  function updateMultiTargetAI(fighters, vb) {
+    const now = performance.now();
+    for (const f of fighters) {
+      // Only redirect AI fighters (f.ai = true on CPU fighters, false on player)
+      if (!f || !f.ai || f._spectator || f.alive === false) continue;
+
+      const cd = _aiTargetCooldowns.get(f) || 0;
+      if (now < cd) continue;
+      // Retarget every 400–700 ms with randomness so CPUs don't act in lockstep
+      _aiTargetCooldowns.set(f, now + 400 + Math.random() * 300);
+
+      const target = pickBestTarget(f, fighters);
+      if (target) f.aiTarget = target;
+
+      // Boost aggression: shorten the "think" cooldown so AI reacts faster
+      if (typeof f._aiThink === 'number'   && f._aiThink > 0.12)  f._aiThink  = 0.05;
+      // Allow combo follow-ups: reduce heavy-attack cooldown
+      if (typeof f._aiHeavyCd === 'number' && f._aiHeavyCd > 0.25) f._aiHeavyCd = 0.1;
+    }
+  }
+  // ============================================================
+
   async function loadGLTFLoader() {
     const mod = await import('https://esm.sh/three@0.184.0/examples/jsm/loaders/GLTFLoader.js');
     return mod.GLTFLoader;
@@ -605,6 +660,9 @@
 
     // 0b) Apply smash-style knockback physics (overrides bundle's lerp friction).
     applySmashKnockbackPhysics(fighters, vb);
+
+    // 0c) Multi-target AI: redirect each CPU to attack the best available target.
+    updateMultiTargetAI(fighters, vb);
 
     for (const f of fighters) {
       if (!f || !f.position) continue;
